@@ -151,27 +151,20 @@ if [[ ${#NOMBRES_ARRAY[@]} -gt 0 ]]; then
     mkdir -p "$CACHE_DIR"
 
     for nombre in "${NOMBRES_ARRAY[@]}"; do
-        # Trimmear por las dudas
-        nombre_limpio=$(echo "$nombre" | xargs)
+        nombre_limpio=$(echo "$nombre" | xargs) #para trimearlo
         ARCHIVO="$CACHE_DIR/nombre_${nombre_limpio}.json"
 
         if [[ -f "$ARCHIVO" ]]; then
             echo "Cargando '$nombre_limpio' desde caché..."
-            # Como en el caché guardamos el objeto final, lo imprimimos
             imprimir_personaje "$(cat "$ARCHIVO")"
         else
             # Llamada individual por nombre (la API usa query params para strings)
-            # Codificamos el espacio por si el nombre tiene espacios (ej: Rick Sanchez)
-            RESPUESTA=$(wget -qO- "${API_URL}/?name=${nombre_limpio// /%20}")
-
+            RESPUESTA=$(wget -qO- "${API_URL}/?name=${nombre_limpio}")
             if [[ $? -eq 0 && -n "$RESPUESTA" ]]; then
-                # IMPORTANTE: Aquí extraemos el array 'results' y lo procesamos
+                # IMPORTANTE: viene dentro de un objeto diferente al de ids, es un objeto con informacion general como cant resultados, cant paginas, etc y luego un array (results) donde estan cada objeto de personaje encontrado
                 echo "$RESPUESTA" | jq -c '.results[]' | while read -r p; do
-                    imprimir_personaje "$p"
-                    
-                    # Obtenemos el nombre exacto del personaje para el archivo de caché
+                    imprimir_personaje "$p" 
                     NOMBRE_PERSONAJE=$(echo "$p" | jq -r '.name')
-                    # Sustituimos espacios por guiones para el nombre de archivo
                     echo "$p" > "$CACHE_DIR/nombre_${NOMBRE_PERSONAJE// /-}.json"
                 done
             else
