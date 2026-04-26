@@ -127,6 +127,7 @@ if [[ ${#IDS_ARRAY[@]} -gt 0 ]]; then
         RESPUESTA=$(wget -qO- "${API_URL}/${ids_concatenados}")
 
         if [[ $? -eq 0 && -n "$RESPUESTA" ]]; then
+            # Este if me permite procesar 1 solo elemento o varios
             echo "$RESPUESTA" | jq -c '. | if type == "array" then .[] else . end' | while read -r p; do
                 imprimir_personaje "$p"
                 # Guardo en cache... 1 archivo por id, para facilitar la posterior busqueda
@@ -144,6 +145,38 @@ if [[ ${#IDS_ARRAY[@]} -gt 0 ]]; then
     fi
 fi
 
-# if [[ ${#NOMBRES_ARRAY[@]} -gt 0 ]]; then
-    #TODO
-# fi
+# Por el momento no procesa el paginado....
+if [[ ${#NOMBRES_ARRAY[@]} -gt 0 ]]; then
+    echo "--- Procesando Nombres ---"
+    mkdir -p "$CACHE_DIR"
+
+    for nombre in "${NOMBRES_ARRAY[@]}"; do
+        # Trimmear por las dudas
+        nombre_limpio=$(echo "$nombre" | xargs)
+        ARCHIVO="$CACHE_DIR/nombre_${nombre_limpio}.json"
+
+        if [[ -f "$ARCHIVO" ]]; then
+            echo "Cargando '$nombre_limpio' desde caché..."
+            # Como en el caché guardamos el objeto final, lo imprimimos
+            imprimir_personaje "$(cat "$ARCHIVO")"
+        else
+            # Llamada individual por nombre (la API usa query params para strings)
+            # Codificamos el espacio por si el nombre tiene espacios (ej: Rick Sanchez)
+            RESPUESTA=$(wget -qO- "${API_URL}/?name=${nombre_limpio// /%20}")
+
+            if [[ $? -eq 0 && -n "$RESPUESTA" ]]; then
+                # IMPORTANTE: Aquí extraemos el array 'results' y lo procesamos
+                echo "$RESPUESTA" | jq -c '.results[]' | while read -r p; do
+                    imprimir_personaje "$p"
+                    
+                    # Obtenemos el nombre exacto del personaje para el archivo de caché
+                    NOMBRE_PERSONAJE=$(echo "$p" | jq -r '.name')
+                    # Sustituimos espacios por guiones para el nombre de archivo
+                    echo "$p" > "$CACHE_DIR/nombre_${NOMBRE_PERSONAJE// /-}.json"
+                done
+            else
+                echo "Error: No se encontró ningún personaje con el nombre '$nombre_limpio'."
+            fi
+        fi
+    done
+fi
