@@ -1,152 +1,176 @@
 param(
-    [Alias("d", "directorio")][string]$dir,
-    [Alias("p")][string]$palabras,
-    [Alias("l")][string]$log,
-    [Alias("k")][switch]$kill,
+    # ParameterSet 'Iniciar': Obliga a tener dir, palabras y log.
+    [Parameter(Mandatory=$true, ParameterSetName='Iniciar', HelpMessage="El directorio a monitorear es obligatorio.")]
+    # ParameterSet 'Detener': Obliga a tener dir y kill.
+    [Parameter(Mandatory=$true, ParameterSetName='Detener', HelpMessage="El directorio es obligatorio para saber qué demonio detener.")]
+    [Alias("d", "directorio")]
+    [string]$dir,
+
+    [Parameter(Mandatory=$true, ParameterSetName='Iniciar', HelpMessage="Debe especificar las palabras a buscar (-p).")]
+    [Alias("p")]
+    [string]$palabras,
+
+    [Parameter(Mandatory=$true, ParameterSetName='Iniciar', HelpMessage="Debe especificar la ruta del archivo de log (-l).")]
+    [Alias("l")]
+    [string]$log,
+
+    [Parameter(Mandatory=$true, ParameterSetName='Detener', HelpMessage="Use -kill para detener el proceso.")]
+    [Alias("k")]
+    [switch]$kill,
+
+    # Parámetro oculto de uso interno para el ParameterSet 'Iniciar'
+    [Parameter(Mandatory=$false, ParameterSetName='Iniciar')]
     [switch]$daemon 
 )
 
+$ErrorActionPreference = "Stop"
 
-# Validaciones Iniciales
 
-if (-not $dir) {
-    Write-Host "Error: El parámetro -d / -directorio es obligatorio." -ForegroundColor Red
-    exit
+# Funciones Auxiliares
+
+function Get-DaemonTempFile {
+    param ([string]$Path)
+    $md5 = [System.Security.Cryptography.MD5]::Create()
+    $hashBytes = $md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Path))
+    $hashString = [System.BitConverter]::ToString($hashBytes) -replace '-'
+    
+    $tempDir = [System.IO.Path]::GetTempPath()
+    return Join-Path -Path $tempDir -ChildPath "demonio_$hashString.pid"
 }
 
-$dirFullPath = [System.IO.Path]::GetFullPath($dir)
-
-if (-not (Test-Path $dirFullPath) -and -not $kill) {
-    Write-Host "Error: El directorio '$dirFullPath' no existe." -ForegroundColor Red
-    exit
-}
-
-$md5 = [System.Security.Cryptography.MD5]::Create()
-$hashBytes = $md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($dirFullPath))
-$hashString = [System.BitConverter]::ToString($hashBytes) -replace '-'
-
-$tempDir = [System.IO.Path]::GetTempPath()
-$pidFileName = "demonio_$hashString.pid"
-$pidFile = Join-Path -Path $tempDir -ChildPath $pidFileName
-
-
-# Lógica de Finalización (-kill)
-
-if ($kill) {
-    if (Test-Path $pidFile) {
-        $targetPid = Get-Content $pidFile
+function Stop-Demonio {
+    param ([string]$TargetDir, [string]$PidFile)
+    
+    if (Test-Path $PidFile) {
+        $targetPid = Get-Content $PidFile
         $process = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
         if ($process) {
             Stop-Process -Id $targetPid -Force
-            Write-Host "Demonio en '$dirFullPath' detenido exitosamente (PID $targetPid)." -ForegroundColor Green
+            Write-Host "Éxito: Demonio en '$TargetDir' detenido correctamente (PID $targetPid)." -ForegroundColor Green
         } else {
-            Write-Host "El proceso ya no estaba en ejecución. Limpiando registro..." -ForegroundColor Yellow
+            Write-Host "Aviso: El proceso ya no estaba en ejecución. Limpiando archivos residuales..." -ForegroundColor Yellow
         }
-        Remove-Item $pidFile -Force
+        Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
     } else {
-        Write-Host "No hay ningún demonio en ejecución para el directorio: $dirFullPath" -ForegroundColor Yellow
-    }
-    exit
-}
-
-
-# Validaciones para Inicio
-
-if (-not $palabras -or -not $log) {
-    Write-Host "Error: Faltan parámetros (-p/-palabras y -l/-log son obligatorios)." -ForegroundColor Red
-    exit
-}
-
-$logFullPath = [System.IO.Path]::GetFullPath($log)
-
-if (Test-Path $pidFile) {
-    $existingPid = Get-Content $pidFile
-    if (Get-Process -Id $existingPid -ErrorAction SilentlyContinue) {
-        Write-Host "Error: Ya existe un demonio en ejecución para '$dirFullPath'." -ForegroundColor Red
-        exit
-    } else {
-        Remove-Item $pidFile -Force
+        Write-Host "Aviso: No se encontró ningún demonio activo para el directorio '$TargetDir'." -ForegroundColor Yellow
     }
 }
 
-if (-not $daemon) {
+function Start-DemonioFondo {
+    param ([string]$DirFullPath, [string]$LogFullPath, [string]$PalabrasClave, [string]$ScriptPath)
+    
     if ($IsLinux) {
         $psExe = "pwsh"
-        $argsList = "-File `"$PSCommandPath`" -d `"$dirFullPath`" -p `"$palabras`" -l `"$logFullPath`" -daemon"
+        $argsList = "-File `"$ScriptPath`" -d `"$DirFullPath`" -p `"$PalabrasClave`" -l `"$LogFullPath`" -daemon"
     } else {
         $psExe = "powershell.exe"
-        $argsList = "-WindowStyle Hidden -File `"$PSCommandPath`" -d `"$dirFullPath`" -p `"$palabras`" -l `"$logFullPath`" -daemon"
+        $argsList = "-WindowStyle Hidden -File `"$ScriptPath`" -d `"$DirFullPath`" -p `"$PalabrasClave`" -l `"$LogFullPath`" -daemon"
     }
     
     Start-Process $psExe -ArgumentList $argsList
-    Write-Host "Demonio iniciado en segundo plano. Monitoreando: $dirFullPath" -ForegroundColor Green
-    exit
+    Write-Host "Éxito: Demonio iniciado en segundo plano. Monitoreando: $DirFullPath" -ForegroundColor Green
 }
 
-
-# Ejecución del Demonio
-
-$PID | Out-File -FilePath $pidFile -Force
-
-$script:regexPattern = $palabras -replace ",", "|"
-$script:logPath = $logFullPath
-
-function Log-Event($filePath, $op) {
-    $fileInfo = Get-Item $filePath
-    $size = $fileInfo.Length
-    $datetime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $mensaje = "[$datetime] Operación: $op | Archivo: $filePath | Tamaño: $size bytes"
-    Add-Content -Path $script:logPath -Value $mensaje
-}
-
-Get-ChildItem -Path $dirFullPath -File | ForEach-Object {
-    if (Select-String -Path $_.FullName -Pattern $script:regexPattern -Quiet -ErrorAction SilentlyContinue) {
-        Log-Event $_.FullName "EXISTENTE (Escaneo Inicial)"
-    }
-}
-
-$watcher = New-Object System.IO.FileSystemWatcher
-$watcher.Path = $dirFullPath
-$watcher.IncludeSubdirectories = $false
-
-$watcher.NotifyFilter = [System.IO.NotifyFilters]::LastWrite -bor 
-                        [System.IO.NotifyFilters]::FileName -bor 
-                        [System.IO.NotifyFilters]::Size
-
-$eventData = @{
-    RegexPattern = ($palabras -replace ",", "|")
-    LogPath      = $logFullPath
-}
-
-$action = {
-    $path = $Event.SourceEventArgs.FullPath
-    $changeType = $Event.SourceEventArgs.ChangeType
+function Invoke-Monitoreo {
+    param ([string]$DirFullPath, [string]$LogFullPath, [string]$PalabrasClave, [string]$PidFile)
     
-    $pattern = $Event.MessageData.RegexPattern
-    $log = $Event.MessageData.LogPath
-    
-    Start-Sleep -Milliseconds 500 
-    
-    if (Test-Path $path -PathType Leaf) {
-        try {
-            if (Select-String -Path $path -Pattern $pattern -Quiet -ErrorAction Stop) {
-                $size = (Get-Item $path).Length
+    try {
+        $PID | Out-File -FilePath $PidFile -Force
+
+        $regexPattern = $PalabrasClave -replace ",", "|"
+
+        Get-ChildItem -Path $DirFullPath -File | ForEach-Object {
+            if (Select-String -Path $_.FullName -Pattern $regexPattern -Quiet -ErrorAction SilentlyContinue) {
+                $size = (Get-Item $_.FullName).Length
                 $datetime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-                $mensaje = "[$datetime] Operación: NUEVO/MODIFICADO ($changeType) | Archivo: $path | Tamaño: $size bytes"
-                
-                Add-Content -Path $log -Value $mensaje -ErrorAction SilentlyContinue
+                Add-Content -Path $LogFullPath -Value "[$datetime] Operación: EXISTENTE | Archivo: $($_.FullName) | Tamaño: $size bytes"
             }
-        } catch {
+        }
+
+        $watcher = New-Object System.IO.FileSystemWatcher
+        $watcher.Path = $DirFullPath
+        $watcher.IncludeSubdirectories = $false
+        $watcher.NotifyFilter = [System.IO.NotifyFilters]::LastWrite -bor [System.IO.NotifyFilters]::FileName -bor [System.IO.NotifyFilters]::Size
+
+        $eventData = @{
+            RegexPattern = $regexPattern
+            LogPath      = $LogFullPath
+        }
+
+        $action = {
+            $path = $Event.SourceEventArgs.FullPath
+            $changeType = $Event.SourceEventArgs.ChangeType
+            $pattern = $Event.MessageData.RegexPattern
+            $log = $Event.MessageData.LogPath
+            
+            Start-Sleep -Milliseconds 500 
+            
+            if (Test-Path $path -PathType Leaf) {
+                try {
+                    if (Select-String -Path $path -Pattern $pattern -Quiet -ErrorAction Stop) {
+                        $size = (Get-Item $path).Length
+                        $datetime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                        Add-Content -Path $log -Value "[$datetime] Operación: NUEVO/MODIFICADO ($changeType) | Archivo: $path | Tamaño: $size bytes" -ErrorAction SilentlyContinue
+                    }
+                } catch {
+                    # Ignorar si el archivo está temporalmente bloqueado
+                }
+            }
+        }
+
+        Register-ObjectEvent $watcher "Created" -MessageData $eventData -Action $action > $null
+        Register-ObjectEvent $watcher "Changed" -MessageData $eventData -Action $action > $null
+        Register-ObjectEvent $watcher "Renamed" -MessageData $eventData -Action $action > $null
+
+        $watcher.EnableRaisingEvents = $true
+
+        while ($true) {
+            Start-Sleep -Seconds 10
+        }
+    }
+    finally {
+        if (Test-Path $PidFile) {
+            Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
         }
     }
 }
 
-Register-ObjectEvent $watcher "Created" -MessageData $eventData -Action $action > $null
-Register-ObjectEvent $watcher "Changed" -MessageData $eventData -Action $action > $null
-Register-ObjectEvent $watcher "Renamed" -MessageData $eventData -Action $action > $null
+try {
+    $dirFullPath = [System.IO.Path]::GetFullPath($dir)
+    $pidFile = Get-DaemonTempFile -Path $dirFullPath
 
-$watcher.EnableRaisingEvents = $true
+    if ($kill) {
+        Stop-Demonio -TargetDir $dirFullPath -PidFile $pidFile
+    }
+    else {
+        if (-not (Test-Path -LiteralPath $dirFullPath)) {
+            throw "El directorio especificado '$dirFullPath' no existe o no se puede acceder a él."
+        }
 
-while ($true) {
-    Start-Sleep -Seconds 10
+        $logFullPath = [System.IO.Path]::GetFullPath($log)
+
+        if (Test-Path $pidFile) {
+            $existingPid = Get-Content $pidFile
+            if (Get-Process -Id $existingPid -ErrorAction SilentlyContinue) {
+                throw "Ya existe un demonio en ejecución para el directorio '$dirFullPath'."
+            } else {
+                Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        if (-not $daemon) {
+            Start-DemonioFondo -DirFullPath $dirFullPath -LogFullPath $logFullPath -PalabrasClave $palabras -ScriptPath $PSCommandPath
+        } else {
+            Invoke-Monitoreo -DirFullPath $dirFullPath -LogFullPath $logFullPath -PalabrasClave $palabras -PidFile $pidFile
+        }
+    }
+}
+catch {
+    Write-Host ""
+    Write-Host "================ ATENCIÓN ================" -ForegroundColor Red
+    Write-Host "Ocurrió un problema al ejecutar la herramienta:" -ForegroundColor Yellow
+    Write-Host $_.Exception.Message -ForegroundColor White
+    Write-Host "Si necesita ayuda sobre cómo usar el comando, escriba: Get-Help $PSCommandPath" -ForegroundColor Cyan
+    Write-Host "==========================================" -ForegroundColor Red
+    Write-Host ""
 }
