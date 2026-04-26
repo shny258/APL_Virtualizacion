@@ -85,7 +85,32 @@ fi
 if [[ ${#IDS_ARRAY[@]} -gt 0 ]]; then
     echo "--- Procesando IDs ---"
     ids_concatenados=$(IFS=,; echo "${IDS_ARRAY[*]}")
-    wget -qO- "${API_URL}/${ids_concatenados}"
+    # TODO: implementar busqueda en cache, si esta devuelvo y no llamo a la API
+    RESPUESTA=$(wget -qO- "${API_URL}/${ids_concatenados}")
+
+    if [[ $? -ne 0 || -z "$RESPUESTA" ]]; then
+        echo "Error: No se pudo conectar con la API o el ID no existe."
+    else
+        echo "$RESPUESTA" | jq -c '. | if type == "array" then .[] else . end' | while read -r p; do
+        echo "-----------------------"
+        echo "$p" | jq -r '
+        "Character info:",
+        "Id: \(.id)",
+        "Name: \(.name)",
+        "Status: \(.status)",
+        "Species: \(.species)",
+        "Gender: \(.gender)",
+        "Origin: \(.origin.name)",
+        "Location: \(.location.name)",
+        "Episodes: \(.episode | length)"
+        '
+        # Guardo en cache... 1 archivo por id, para facilitar la posterior busqueda
+        ID_ACTUAL=$(echo "$p" | jq -r '.id')
+        mkdir -p cache
+        echo "$p" > "cache/id_${ID_ACTUAL}.json"
+
+        done
+    fi
 fi
 
 if [[ ${#NOMBRES_ARRAY[@]} -gt 0 ]]; then
