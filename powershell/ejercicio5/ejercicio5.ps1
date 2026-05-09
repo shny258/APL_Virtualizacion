@@ -1,5 +1,10 @@
 #!/usr/bin/pwsh
 
+<#
+    Integrantes del equipo:
+    Tomas Ballesteros, Nicolas Catania, Rodrigo Ezequiel Aragón, Villan Matias Nicolas, Luciano martins louro
+#>
+
 param(
     [Parameter(HelpMessage="ID o lista de IDs de personajes (ej: 1,2,3)")]
     [string[]]$Id,
