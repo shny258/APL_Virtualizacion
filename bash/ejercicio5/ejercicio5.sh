@@ -1,5 +1,8 @@
 #!/bin/bash
 
+
+# Integrantes del equipo: Tomas Ballesteros, Nicolas Catania, Rodrigo Ezequiel Aragón, Villan Matias Nicolas, Luciano martins louro
+
 # Inicialización de variables
 IDS_ARRAY=()
 NOMBRES_ARRAY=()
