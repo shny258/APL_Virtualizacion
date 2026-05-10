@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Integrantes del equipo: Tomas Ballesteros, Nicolas Catania, Rodrigo Ezequiel Aragón, Villan Matias Nicolas, Luciano Martins Louro
+
 archivoEntrada=""
 archivoSalida=""
 

@@ -3,6 +3,8 @@
     Procesa un archivo de texto aplicando reglas de puntuación y formato.
 #>
 
+# Integrantes del equipo: Tomas Ballesteros, Nicolas Catania, Rodrigo Ezequiel Aragón, Villan Matias Nicolas, Luciano Martins Louro
+
 param (
     [Parameter(Mandatory=$false)]
     [Alias("a", "archivo")] #Reconoce -a y -archivo
