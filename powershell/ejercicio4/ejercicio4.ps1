@@ -1,3 +1,5 @@
+# Integrantes del equipo: Tomas Ballesteros, Nicolas Catania, Rodrigo Ezequiel Aragón, Villan Matias Nicolas, Luciano Martins Louro
+
 param(
     # ParameterSet 'Iniciar': Obliga a tener dir, palabras y log.
     [Parameter(Mandatory=$true, ParameterSetName='Iniciar', HelpMessage="El directorio a monitorear es obligatorio.")]
